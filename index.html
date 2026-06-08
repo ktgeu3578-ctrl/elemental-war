@@ -544,7 +544,8 @@
     let pvpEventQueue = [];          // 내가 상대에게 보낼 이벤트 모음 (hit / skill / shot)
     let pvpEventSeq = 0;             // 내 이벤트 단조 증가 ID
     let pvpLastAckedEvent = 0;       // 상대 이벤트 중 내가 처리한 마지막 ID
-    let pvpPendingDamageToOpp = 0;   // 내가 누적한, 상대에게 줄 데미지(표시용)    let isMobileMode = localStorage.getItem('es_mobile_mode') === 'true'; let settingOrigin = 'main';
+    let pvpPendingDamageToOpp = 0;   // 내가 누적한, 상대에게 줄 데미지(표시용)    
+    let isMobileMode = localStorage.getItem('es_mobile_mode') === 'true'; let settingOrigin = 'main';
     let joystick = { active: false, dx: 0, dy: 0, touchId: null };
 
     const EL = { fire:{color:'#ff5470', strong:'wind', weak:'water', name:'불'}, water:{color:'#4f9cff', strong:'fire', weak:'earth', name:'물'}, wind:{color:'#5bd97a', strong:'earth', weak:'fire', name:'바람'}, earth:{color:'#ff9a3b', strong:'water', weak:'wind', name:'흙'}, neutral:{color:'#c8c2e8', strong:null, weak:null, name:'무'}, dark:{color:'#b06bff', strong:'all', weak:'none', name:'암흑'} };
