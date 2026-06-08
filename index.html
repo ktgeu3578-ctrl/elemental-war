@@ -971,12 +971,15 @@
     function handleOpponentEvent(ev) {
         const o = pvpOpponent;
         const ox = o ? o.x : ev.x, oy = o ? o.y : ev.y;
-        if (ev.kind === 'hit') {
-            if (player.invincible <= 0 && !cheatNoDmg && !pvpFinished) {
-                player.hp -= (ev.dmg || 0);
-                createFloatingText(player.x, player.y - 30, "-" + Math.round(ev.dmg || 0), "#ff5470");
-                createParticles(player.x, player.y, '#ff5470', 12);
-                screenShake = 8;
+            if (ev.skill === 'q') {
+                // 경질화: 상대 주위 마법진 + 돌 파편 (화면 밖이어도 effect는 그려짐)
+                addEffect(ox, oy, 'magic_circle', 0);
+                for (let m = 0; m < 16; m++) { let a = (Math.PI*2/16)*m; createParticles(ox+Math.cos(a)*30, oy+Math.sin(a)*30, EL['earth'].color, 4); }
+            } else if (ev.skill === 'r') {
+                // 영역전개: 상대를 중심으로 한 도메인 원을 visualEffects로 표시
+                let dr = ev.lvl >= 3 ? 600 : (ev.lvl === 2 ? 450 : 350);
+                addEffect(ox, oy, 'pvp_domain', dr);
+                addEffect(ox, oy, 'magic_circle', 0);
             }
         } else if (ev.kind === 'swing') {
             // 상대의 근접 휘두름을 내 화면에 검기 이펙트로 표시
@@ -1847,6 +1850,7 @@
             else if (v.type === 'magic_circle') { ctx.save(); ctx.translate(v.x, v.y); ctx.rotate(gameFrame*0.2); ctx.strokeStyle = '#b06bff'; ctx.lineWidth = 4; ctx.setLineDash([8,6]); ctx.beginPath(); ctx.arc(0,0,50,0,Math.PI*2); ctx.stroke(); ctx.setLineDash([]); ctx.beginPath(); ctx.moveTo(-40,-25); ctx.lineTo(40,-25); ctx.lineTo(0,45); ctx.closePath(); ctx.stroke(); ctx.restore(); }
             else if (v.type === 'muzzle_flash') { ctx.save(); ctx.translate(v.x, v.y); ctx.rotate(v.angle); px(ctx,0,-6,40,12,'rgba(255,217,59,0.9)'); px(ctx,10,-3,26,6,'#fff'); ctx.restore(); }
             ctx.globalAlpha = 1.0; });
+            else if (v.type === 'pvp_domain') { let dr = v.angle || 350; ctx.save(); ctx.globalAlpha = v.life * 0.5; const g = ctx.createRadialGradient(v.x, v.y, 0, v.x, v.y, dr); g.addColorStop(0, 'rgba(0,0,0,0.5)'); g.addColorStop(0.8, 'rgba(176,107,255,0.4)'); g.addColorStop(1, 'transparent'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(v.x, v.y, dr, 0, Math.PI*2); ctx.fill(); ctx.strokeStyle = '#b06bff'; ctx.lineWidth = 4; ctx.setLineDash([12,10]); ctx.beginPath(); ctx.arc(v.x, v.y, dr, 0, Math.PI*2); ctx.stroke(); ctx.setLineDash([]); ctx.restore(); }
 
         if (player.invincible > 0) { ctx.strokeStyle='#ff9a3b'; ctx.lineWidth=3; ctx.strokeRect(player.x-player.size-6, player.y-player.size-6, (player.size+6)*2, (player.size+6)*2); }
         if (player.healBuff > 0) { ctx.globalAlpha = 0.25; px(ctx, player.x-player.size-4, player.y-player.size-4, (player.size+4)*2, (player.size+4)*2, '#5bd97a'); ctx.globalAlpha = 1; }
