@@ -969,29 +969,48 @@
 
     // 상대가 보낸 단일 이벤트를 내 화면/상태에 반영
     function handleOpponentEvent(ev) {
+        const o = pvpOpponent;
+        const ox = o ? o.x : ev.x, oy = o ? o.y : ev.y;
         if (ev.kind === 'hit') {
-            // 상대가 나를 때렸다고 알림 → 내 HP를 권위적으로 차감
             if (player.invincible <= 0 && !cheatNoDmg && !pvpFinished) {
                 player.hp -= (ev.dmg || 0);
                 createFloatingText(player.x, player.y - 30, "-" + Math.round(ev.dmg || 0), "#ff5470");
-                createParticles(player.x, player.y, '#ff5470', 10);
+                createParticles(player.x, player.y, '#ff5470', 12);
                 screenShake = 8;
             }
+        } else if (ev.kind === 'swing') {
+            // 상대의 근접 휘두름을 내 화면에 검기 이펙트로 표시
+            addEffect(ev.x, ev.y, 'sword_slash', ev.angle || 0);
+            createParticles(ev.x, ev.y, EL[ev.el] ? EL[ev.el].color : '#ff5470', 8);
         } else if (ev.kind === 'skill') {
-            // 상대 스킬 이펙트 표시
-            const o = pvpOpponent;
             const col = EL[ev.el] ? EL[ev.el].color : '#b06bff';
             const names = { q: '경질화', e: '검기', r: '영역전개', f: '치유', c: '소환술' };
-            createParticles(o ? o.x : ev.x, o ? o.y : ev.y, col, 40);
-            createFloatingText((o ? o.x : ev.x), (o ? o.y : ev.y) - 50, `상대: ${names[ev.skill] || ev.skill}!`, col);
-            if (ev.skill === 'e') {
-                // 검기: 상대 주위로 퍼지는 탄막 시각 효과
-                for (let m = 0; m < 12; m++) { let a = (Math.PI*2/12)*m; createParticles((o?o.x:ev.x)+Math.cos(a)*40, (o?o.y:ev.y)+Math.sin(a)*40, EL['wind'].color, 3); }
+            createFloatingText(ox, oy - 50, `상대: ${names[ev.skill] || ev.skill}!`, col);
+            if (ev.skill === 'q') {
+                // 경질화: 상대 주위로 돌 파편 + 노란 테두리 느낌
+                createParticles(ox, oy, EL['earth'].color, 40);
+            } else if (ev.skill === 'e') {
+                // 검기: 상대 주위로 퍼지는 탄막 시각효과 (실제 회전 검기처럼)
+                let cnt = ev.lvl >= 2 ? 16 : 8;
+                for (let m = 0; m < cnt; m++) {
+                    let a = (Math.PI*2/cnt)*m;
+                    enemyProjectiles.push({ x: ox, y: oy, vx: Math.cos(a)*14, vy: Math.sin(a)*14, radius: 12, damage: 0, element: 'wind', color: EL['wind'].color, fromPvp: true, ignoreSafeZone: true, pvpVisual: true, life: 60 });
+                }
+                addEffect(ox, oy, 'magic_circle', 0);
             } else if (ev.skill === 'r') {
-                for (let m = 0; m < 20; m++) { let a = (Math.PI*2/20)*m; createParticles((o?o.x:ev.x)+Math.cos(a)*60, (o?o.y:ev.y)+Math.sin(a)*60, col, 3); }
+                // 영역전개: 큰 원형 도메인 이펙트
+                addEffect(ox, oy, 'magic_circle', 0);
+                let dr = ev.lvl >= 3 ? 600 : (ev.lvl === 2 ? 450 : 350);
+                for (let m = 0; m < 24; m++) { let a = (Math.PI*2/24)*m; createParticles(ox+Math.cos(a)*dr*0.5, oy+Math.sin(a)*dr*0.5, col, 3); }
+            } else if (ev.skill === 'f') {
+                // 치유: 초록 회복 파티클
+                createParticles(ox, oy, '#5bd97a', 40);
+            } else if (ev.skill === 'c') {
+                createParticles(ox, oy, '#b06bff', 50);
+            } else {
+                createParticles(ox, oy, col, 30);
             }
         } else if (ev.kind === 'shot') {
-            // 상대 투사체 시각 표현(데미지는 명중 시 hit 이벤트로 옴)
             enemyProjectiles.push({ x: ev.x, y: ev.y, vx: ev.vx, vy: ev.vy, radius: ev.r || 10, damage: 0, element: ev.el || 'dark', color: (EL[ev.el] ? EL[ev.el].color : '#ff5470'), fromPvp: true, ignoreSafeZone: true, pvpVisual: true });
         }
     }
@@ -1036,6 +1055,12 @@
         if (!pvpOpponent || pvpFinished) return;
         const o = pvpOpponent;
         if (o.damageCooldown > 0) o.damageCooldown--;
+        // 내가 근접 공격을 시작한 프레임에 "휘두름" 이벤트 전송(명중 여부와 무관하게 시각효과용)
+        if (player.isAttacking && !player._pvpSwingSent) {
+            player._pvpSwingSent = true;
+            pvpEventQueue.push({ id: ++pvpEventSeq, kind: 'swing', x: Math.round(player.x), y: Math.round(player.y), angle: Math.round(player.angle*100)/100, weapon: equipped.melee ? equipped.melee.weaponType : 'sword', el: equipped.melee ? equipped.melee.element : 'neutral' });
+        }
+        if (!player.isAttacking) player._pvpSwingSent = false;
 
         // === 내가 상대를 때리는 판정(내가 계산 → hit 이벤트로 통보) ===
         // 근접 공격
@@ -1365,8 +1390,7 @@
     function updateJoystick(touch) { let dx = touch.clientX - joyCenterX; let dy = touch.clientY - joyCenterY; let dist = Math.sqrt(dx*dx + dy*dy); if(dist > maxJoyDist) { dx = (dx/dist)*maxJoyDist; dy = (dy/dist)*maxJoyDist; } joyStick.style.transform = `translate(${dx}px, ${dy}px)`; joystick.dx = dx / maxJoyDist; joystick.dy = dy / maxJoyDist; }
 
     function activateSkill(type) {
-        if (isPvp && !pvpFinished) pvpEventQueue.push({ id: ++pvpEventSeq, kind: 'skill', skill: type, x: Math.round(player.x), y: Math.round(player.y), el: (skills[type] && skills[type].element) || 'neutral' });
-        if(!cheatNoCD) skills[type].cd = skills[type].maxCd;
+        if (isPvp && !pvpFinished) pvpEventQueue.push({ id: ++pvpEventSeq, kind: 'skill', skill: type, x: Math.round(player.x), y: Math.round(player.y), angle: Math.round(player.angle*100)/100, lvl: (skills[type] && skills[type].level) || 1, el: (skills[type] && skills[type].element) || 'neutral' });        if(!cheatNoCD) skills[type].cd = skills[type].maxCd;
         if (type === 'q') { let dur = 180; if (skills.q.level === 2) dur = 240; if (skills.q.level >= 3) dur = 300; player.invincible = dur; createParticles(player.x, player.y, EL['earth'].color, 40); }
         else if (type === 'e') { let projCount = 8; if (skills.e.level >= 2) projCount = 16; let isHoming = skills.e.level >= 3; let w = equipped.melee; let dmg = w ? w.dmg * 1.5 + player.baseMelee : 30; for(let i=0; i<projCount; i++) { let ang = (Math.PI*2 / projCount) * i; projectiles.push({ x: player.x, y: player.y, vx: Math.cos(ang)*14, vy: Math.sin(ang)*14, radius: 12, damage: dmg, element: 'wind', color: EL['wind'].color, glow: '#a29bfe', homing: isHoming }); } }
         else if (type === 'r') { let dur = 300; if (skills.r.level >= 2) dur = 400; if (skills.r.level >= 3) dur = 500; player.domainActive = dur; createParticles(player.x, player.y, EL[skills.r.element].color, 60); }
