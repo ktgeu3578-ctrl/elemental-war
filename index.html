@@ -541,7 +541,10 @@
     let waveMaxFrames = 180 * 60; let waveFrames = 0; let finalBossSpawned = false; let extremeBossRushCount = 0;
     let arenaTimer = 0; let hasRevive = false; let boughtRevive = false; let arenaLives = 0;
     let isPvp = false; let pvpOpponent = null; let pvpLastPush = 0; let pvpFinished = false; let pvpMyMaxHp = 2000;
-    let isMobileMode = localStorage.getItem('es_mobile_mode') === 'true'; let settingOrigin = 'main';
+    let pvpEventQueue = [];          // 내가 상대에게 보낼 이벤트 모음 (hit / skill / shot)
+    let pvpEventSeq = 0;             // 내 이벤트 단조 증가 ID
+    let pvpLastAckedEvent = 0;       // 상대 이벤트 중 내가 처리한 마지막 ID
+    let pvpPendingDamageToOpp = 0;   // 내가 누적한, 상대에게 줄 데미지(표시용)    let isMobileMode = localStorage.getItem('es_mobile_mode') === 'true'; let settingOrigin = 'main';
     let joystick = { active: false, dx: 0, dy: 0, touchId: null };
 
     const EL = { fire:{color:'#ff5470', strong:'wind', weak:'water', name:'불'}, water:{color:'#4f9cff', strong:'fire', weak:'earth', name:'물'}, wind:{color:'#5bd97a', strong:'earth', weak:'fire', name:'바람'}, earth:{color:'#ff9a3b', strong:'water', weak:'wind', name:'흙'}, neutral:{color:'#c8c2e8', strong:null, weak:null, name:'무'}, dark:{color:'#b06bff', strong:'all', weak:'none', name:'암흑'} };
@@ -755,7 +758,7 @@
     function closeRanking() { document.getElementById('ranking-screen').style.display = 'none'; document.getElementById('main-menu').style.display = 'flex'; }
 
     function toggleUIVisibility(show) { ['ui-top', 'ui-bottom-center', 'ui-bottom-right'].forEach(id => { let el = document.getElementById(id); if(el) el.style.display = show ? 'block' : 'none'; }); }
-    function goToMenu() { if (isPvp) { window.pvpLeave(); isPvp = false; pvpOpponent = null; pvpStarted = false; pvpFinished = false; pvpMyShots = []; } ['pause-screen', 'game-over-screen', 'game-clear-screen', 'mobile-ui', 'pvp-result-screen'].forEach(id => document.getElementById(id).style.display = 'none'); toggleUIVisibility(false); document.getElementById('main-menu').style.display = 'flex'; isGameStarted = false; isPaused = false; updateLobbyUI(); }
+    function goToMenu() { if (isPvp) { window.pvpLeave(); isPvp = false; pvpOpponent = null; pvpStarted = false; pvpFinished = false; pvpMyShots = []; pvpEventQueue = []; pvpEventSeq = 0; pvpLastAckedEvent = 0; } ['pause-screen', 'game-over-screen', 'game-clear-screen', 'mobile-ui', 'pvp-result-screen'].forEach(id => document.getElementById(id).style.display = 'none'); toggleUIVisibility(false); document.getElementById('main-menu').style.display = 'flex'; isGameStarted = false; isPaused = false; updateLobbyUI(); }
 
     function initSettings() { const toggle = document.getElementById('mobile-toggle'); if (isMobileMode) toggle.classList.add('on'); else toggle.classList.remove('on'); applyMobileMode(); }
     function toggleMobileMode() { isMobileMode = !isMobileMode; localStorage.setItem('es_mobile_mode', isMobileMode); const toggle = document.getElementById('mobile-toggle'); if (isMobileMode) toggle.classList.add('on'); else toggle.classList.remove('on'); applyMobileMode(); }
@@ -914,8 +917,8 @@
     function startPvpGame(oppChar, oppNick) {
         document.getElementById('pvp-wait-screen').style.display = 'none';
         isPvp = true; pvpFinished = false;
-        gameMode = 'arena_pvp';
-        bestWave = 1;
+        pvpEventQueue = []; pvpEventSeq = 0; pvpLastAckedEvent = 0; pvpLastPush = 0;
+        gameMode = 'arena_pvp';        bestWave = 1;
         document.getElementById('start-screen').style.display = 'none';
         if (!player.element || player.element === 'neutral') player.element = ['fire','water','wind','earth'][Math.floor(Math.random()*4)];
         actualStartGame();
@@ -942,23 +945,57 @@
 
     function applyOpponentState(s) {
         if (!pvpOpponent) return;
+        // 위치/HP/외형 동기화
         pvpOpponent.x = s.x; pvpOpponent.y = s.y;
-        pvpOpponent.hp = s.hp;
+        if (typeof s.hp === 'number') pvpOpponent.hp = s.hp;
         if (s.maxHp) pvpOpponent.maxHp = s.maxHp;
         pvpOpponent.angle = s.angle;
         pvpOpponent.attacking = s.attacking; pvpOpponent.weapon = s.weapon || 'sword';
         pvpOpponent.dead = !!s.dead;
-        if (s.shots && Array.isArray(s.shots)) {
-            s.shots.forEach(sh => {
-                if (sh.t > (pvpOpponent.lastShotT || 0)) {
-                    enemyProjectiles.push({ x: sh.x, y: sh.y, vx: sh.vx, vy: sh.vy, radius: sh.r||10, damage: sh.dmg||120, element: sh.el||'dark', color: EL[sh.el||'dark'].color, fromPvp: true });
-                }
-            });
-            if (s.shots.length) pvpOpponent.lastShotT = Math.max(...s.shots.map(x=>x.t));
+
+        // 이벤트 처리 (중복 방지: 내가 마지막으로 처리한 ID보다 큰 것만)
+        if (s.events && Array.isArray(s.events)) {
+            let maxId = pvpLastAckedEvent;
+            for (let i = 0; i < s.events.length; i++) {
+                const ev = s.events[i];
+                if (!ev || ev.id <= pvpLastAckedEvent) continue;
+                handleOpponentEvent(ev);
+                if (ev.id > maxId) maxId = ev.id;
+            }
+            pvpLastAckedEvent = maxId;
         }
     }
 
-    let pvpMyShots = [];
+    // 상대가 보낸 단일 이벤트를 내 화면/상태에 반영
+    function handleOpponentEvent(ev) {
+        if (ev.kind === 'hit') {
+            // 상대가 나를 때렸다고 알림 → 내 HP를 권위적으로 차감
+            if (player.invincible <= 0 && !cheatNoDmg && !pvpFinished) {
+                player.hp -= (ev.dmg || 0);
+                createFloatingText(player.x, player.y - 30, "-" + Math.round(ev.dmg || 0), "#ff5470");
+                createParticles(player.x, player.y, '#ff5470', 10);
+                screenShake = 8;
+            }
+        } else if (ev.kind === 'skill') {
+            // 상대 스킬 이펙트 표시
+            const o = pvpOpponent;
+            const col = EL[ev.el] ? EL[ev.el].color : '#b06bff';
+            const names = { q: '경질화', e: '검기', r: '영역전개', f: '치유', c: '소환술' };
+            createParticles(o ? o.x : ev.x, o ? o.y : ev.y, col, 40);
+            createFloatingText((o ? o.x : ev.x), (o ? o.y : ev.y) - 50, `상대: ${names[ev.skill] || ev.skill}!`, col);
+            if (ev.skill === 'e') {
+                // 검기: 상대 주위로 퍼지는 탄막 시각 효과
+                for (let m = 0; m < 12; m++) { let a = (Math.PI*2/12)*m; createParticles((o?o.x:ev.x)+Math.cos(a)*40, (o?o.y:ev.y)+Math.sin(a)*40, EL['wind'].color, 3); }
+            } else if (ev.skill === 'r') {
+                for (let m = 0; m < 20; m++) { let a = (Math.PI*2/20)*m; createParticles((o?o.x:ev.x)+Math.cos(a)*60, (o?o.y:ev.y)+Math.sin(a)*60, col, 3); }
+            }
+        } else if (ev.kind === 'shot') {
+            // 상대 투사체 시각 표현(데미지는 명중 시 hit 이벤트로 옴)
+            enemyProjectiles.push({ x: ev.x, y: ev.y, vx: ev.vx, vy: ev.vy, radius: ev.r || 10, damage: 0, element: ev.el || 'dark', color: (EL[ev.el] ? EL[ev.el].color : '#ff5470'), fromPvp: true, ignoreSafeZone: true, pvpVisual: true });
+        }
+    }
+
+    let pvpMyShots = []; // (호환용, 더이상 사용하지 않음)
     function pvpSyncMyState() {
         if (!isPvp || pvpFinished) return;
         const state = {
@@ -966,10 +1003,12 @@
             hp: Math.round(player.hp), maxHp: Math.round(player.maxHp),
             angle: Math.round(player.angle*100)/100, attacking: !!player.isAttacking,
             weapon: equipped.melee ? equipped.melee.weaponType : 'sword',
-            shots: pvpMyShots.slice(-6),
+            events: pvpEventQueue.slice(-25),   // 최근 이벤트 묶음 전송(누적 ID로 중복 방지)
             dead: player.hp <= 0
         };
         window.pvpPushState(state);
+        // 너무 커지지 않게 큐 정리(전송 직후 오래된 것 제거)
+        if (pvpEventQueue.length > 60) pvpEventQueue.splice(0, pvpEventQueue.length - 60);
     }
 
     function endPvp(iWon, msg) {
@@ -986,6 +1025,7 @@
     function pvpReturnToMenu() {
         window.pvpLeave();
         isPvp = false; pvpOpponent = null; pvpStarted = false; pvpFinished = false; pvpMyShots = [];
+        pvpEventQueue = []; pvpEventSeq = 0; pvpLastAckedEvent = 0; pvpLastPush = 0;   // ← 추가
         document.getElementById('pvp-result-screen').style.display = 'none';
         toggleUIVisibility(false);
         document.getElementById('main-menu').style.display = 'flex';
@@ -995,37 +1035,52 @@
         if (!pvpOpponent || pvpFinished) return;
         const o = pvpOpponent;
         if (o.damageCooldown > 0) o.damageCooldown--;
-        if (player.isAttacking) {
+
+        // === 내가 상대를 때리는 판정(내가 계산 → hit 이벤트로 통보) ===
+        // 근접 공격
+        if (player.isAttacking && o.damageCooldown <= 0) {
             let d = Math.sqrt(distSq(player.x, player.y, o.x, o.y));
-            if (d < player.attackRadius + o.size && o.damageCooldown <= 0) {
+            if (d < player.attackRadius + o.size) {
                 let mdmg = (equipped.melee ? equipped.melee.dmg : 30) + player.baseMelee + 120;
                 o.hp -= mdmg; o.damageCooldown = 12;
                 createFloatingText(o.x, o.y - 30, "-" + Math.round(mdmg), "#fff");
                 createParticles(o.x, o.y, '#ff5470', 10);
+                pvpEventQueue.push({ id: ++pvpEventSeq, kind: 'hit', dmg: Math.round(mdmg) });
             }
         }
+        // 내 투사체 명중
         for (let i = projectiles.length - 1; i >= 0; i--) {
             const p = projectiles[i];
-            if (distSq(p.x, p.y, o.x, o.y) < (o.size + (p.radius||10)) * (o.size + (p.radius||10))) {
+            const lim = o.size + (p.radius || 10);
+            if (distSq(p.x, p.y, o.x, o.y) < lim * lim) {
                 let pdmg = (p.damage || 100);
-                o.hp -= pdmg; createFloatingText(o.x, o.y - 30, "-" + Math.round(pdmg), "#ffd93b");
-                createParticles(o.x, o.y, EL[p.element]?.color || '#ff5470', 8);
+                o.hp -= pdmg;
+                createFloatingText(o.x, o.y - 30, "-" + Math.round(pdmg), "#ffd93b");
+                createParticles(o.x, o.y, EL[p.element] ? EL[p.element].color : '#ff5470', 8);
+                pvpEventQueue.push({ id: ++pvpEventSeq, kind: 'hit', dmg: Math.round(pdmg) });
                 if (!p.pierce) projectiles.splice(i, 1);
             }
         }
-        if (o.attacking && player.invincible <= 0 && !cheatNoDmg) {
-            let d = Math.sqrt(distSq(player.x, player.y, o.x, o.y));
-            if (d < 130 && gameFrame % 12 === 0) {
-                let odmg = 120;
-                player.hp -= odmg; createFloatingText(player.x, player.y - 30, "-" + odmg, "#ff5470");
-                createParticles(player.x, player.y, '#ff5470', 10); screenShake = 8;
+
+        // 상대 투사체(시각용)는 데미지 0이므로 내 HP에 영향 없음 → 그냥 화면을 가로지르다 사라짐.
+        // 단, 화면 정리: pvpVisual 투사체가 나를 통과하면 시각 파티클만.
+        for (let i = enemyProjectiles.length - 1; i >= 0; i--) {
+            const ep = enemyProjectiles[i];
+            if (ep.pvpVisual) {
+                if (distSq(ep.x, ep.y, player.x, player.y) < (player.size + (ep.radius||10)) ** 2) {
+                    createParticles(player.x, player.y, ep.color, 4);
+                    enemyProjectiles.splice(i, 1);
+                }
             }
         }
-        // 승패 판정: 내 HP가 0이면 패배(+dead 동기화). 상대가 dead 신호를 보내면 승리.
+
+        // === 승패 판정 ===
         if (player.hp <= 0 && !cheatNoDmg) { player.hp = 0; pvpSyncMyState(); endPvp(false, "당신은 쓰러졌습니다..."); return; }
-        if (pvpOpponent.dead) { endPvp(true, `${pvpOpponent.nick}을(를) 쓰러뜨렸습니다!`); return; }
+        if (o.dead) { endPvp(true, `${o.nick}을(를) 쓰러뜨렸습니다!`); return; }
+
+        // === 동기화 push (3프레임마다) ===
         pvpLastPush++;
-        if (pvpLastPush >= 5) { pvpLastPush = 0; pvpSyncMyState(); pvpMyShots = []; }
+        if (pvpLastPush >= 3) { pvpLastPush = 0; pvpSyncMyState(); }
     }
 
     function updateShopUI() {
@@ -1284,9 +1339,11 @@
         let pRadius = CHARS[selectedChar].name === "마법사" ? 15 : 10;
         projectiles.push({ x: player.x, y: player.y, vx: Math.cos(angle)*18, vy: Math.sin(angle)*18, radius: pRadius, damage: dmg, element: elem, color: EL[elem].color, glow: '#ffffff', homing: false, special });
         if (special === 'multishot') { projectiles.push({ x: player.x, y: player.y, vx: Math.cos(angle-0.2)*18, vy: Math.sin(angle-0.2)*18, radius: pRadius, damage: dmg, element: elem, color: EL[elem].color, glow: '#ffffff', homing: false, special }); projectiles.push({ x: player.x, y: player.y, vx: Math.cos(angle+0.2)*18, vy: Math.sin(angle+0.2)*18, radius: pRadius, damage: dmg, element: elem, color: EL[elem].color, glow: '#ffffff', homing: false, special }); }
-        if (isPvp) { pvpMyShots.push({ t: performance.now(), x: player.x, y: player.y, vx: Math.cos(angle)*18, vy: Math.sin(angle)*18, r: pRadius, dmg: dmg, el: elem }); }
+        if (isPvp) {
+            // 발사 자체는 시각 표현용 이벤트로만 전송(데미지는 명중 시 hit 이벤트로 처리)
+            pvpEventQueue.push({ id: ++pvpEventSeq, kind: 'shot', x: Math.round(player.x), y: Math.round(player.y), vx: Math.round(Math.cos(angle)*18*100)/100, vy: Math.round(Math.sin(angle)*18*100)/100, r: pRadius, el: elem });
+        }
     }
-
     canvas.addEventListener('pointerdown', (e) => {
         if (isDead || isPaused || !isGameStarted) return;
         const rect = canvas.getBoundingClientRect(); const mouseX = e.clientX - rect.left + camera.x; const mouseY = e.clientY - rect.top + camera.y;
@@ -1307,6 +1364,7 @@
     function updateJoystick(touch) { let dx = touch.clientX - joyCenterX; let dy = touch.clientY - joyCenterY; let dist = Math.sqrt(dx*dx + dy*dy); if(dist > maxJoyDist) { dx = (dx/dist)*maxJoyDist; dy = (dy/dist)*maxJoyDist; } joyStick.style.transform = `translate(${dx}px, ${dy}px)`; joystick.dx = dx / maxJoyDist; joystick.dy = dy / maxJoyDist; }
 
     function activateSkill(type) {
+        if (isPvp && !pvpFinished) pvpEventQueue.push({ id: ++pvpEventSeq, kind: 'skill', skill: type, x: Math.round(player.x), y: Math.round(player.y), el: (skills[type] && skills[type].element) || 'neutral' });
         if(!cheatNoCD) skills[type].cd = skills[type].maxCd;
         if (type === 'q') { let dur = 180; if (skills.q.level === 2) dur = 240; if (skills.q.level >= 3) dur = 300; player.invincible = dur; createParticles(player.x, player.y, EL['earth'].color, 40); }
         else if (type === 'e') { let projCount = 8; if (skills.e.level >= 2) projCount = 16; let isHoming = skills.e.level >= 3; let w = equipped.melee; let dmg = w ? w.dmg * 1.5 + player.baseMelee : 30; for(let i=0; i<projCount; i++) { let ang = (Math.PI*2 / projCount) * i; projectiles.push({ x: player.x, y: player.y, vx: Math.cos(ang)*14, vy: Math.sin(ang)*14, radius: 12, damage: dmg, element: 'wind', color: EL['wind'].color, glow: '#a29bfe', homing: isHoming }); } }
