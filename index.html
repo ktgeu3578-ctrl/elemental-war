@@ -136,27 +136,31 @@
       document.getElementById("login-panel").style.display = "none";
       document.getElementById("login-screen").style.display = "none";
       document.getElementById("user-info").innerText = "👤 " + user.email.split('@')[0];
-      currentUser = user.email.split('@')[0];
+      window.currentUser = user.email.split('@')[0];
+      window.firebaseUser = user;
       const data = await window.loadProgress();
       if (data) {
-        if (data.myGems !== undefined) myGems = data.myGems;
-        if (data.unlockedChars) unlockedChars = data.unlockedChars;
-        if (data.selectedChar) selectedChar = data.selectedChar;
+        if (data.myGems !== undefined) window.myGems = data.myGems;
+        if (data.unlockedChars) window.unlockedChars = data.unlockedChars;
+        if (data.selectedChar) window.selectedChar = data.selectedChar;
       }
-      if (!unlockedChars.includes('c_base')) unlockedChars.push('c_base');
+      if (window.unlockedChars && !window.unlockedChars.includes('c_base')) {
+        window.unlockedChars.push('c_base');
+      }
       document.getElementById("main-menu").style.display = "flex";
-      document.getElementById("welcome-text").innerText = `환영합니다, [${currentUser}]님!`;
+      document.getElementById("welcome-text").innerText = `환영합니다, [${window.currentUser}]님!`;
       if (data && data.player) {
         const btn = document.getElementById('btn-load-save');
         if (btn) btn.style.display = 'block';
       }
-      updateLobbyUI();
+      if (typeof window.updateLobbyUI === 'function') window.updateLobbyUI();
     } else {
       document.getElementById("login-panel").style.display = "flex";
       document.getElementById("user-info").innerText = "";
+      window.currentUser = 'Guest';
+      window.firebaseUser = null;
     }
-  });
-</script>
+  });</script>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -529,7 +533,7 @@
     }
     window.addEventListener('resize', resizeCanvas); resizeCanvas();
 
-    const SAVE_PREFIX = 'es_save_v18_'; let currentUser = 'Guest'; let isDev = false;
+    const SAVE_PREFIX = 'es_save_v18_'; var currentUser = 'Guest'; let isDev = false;
     let cheatNoDmg = false; let cheatNoCD = false;
     let isGameStarted = false; let isPaused = false; let isDead = false; let hasCleared = false;
     let gameMode = 'endless'; let currentWave = 1; let bestWave = 1;
@@ -589,9 +593,9 @@
         }
     }
 
-    let myGems = parseInt(localStorage.getItem('es_gems') || '0');
-    let unlockedChars = JSON.parse(localStorage.getItem('es_chars') || '[]');
-    let selectedChar = null;
+    var myGems = parseInt(localStorage.getItem('es_gems') || '0');
+    var unlockedChars = JSON.parse(localStorage.getItem('es_chars') || '[]');
+    var selectedChar = null;
     if (!localStorage.getItem('es_free_ticket_given')) { myGems += 100; localStorage.setItem('es_free_ticket_given', 'true'); }
 
     const CHARS = {
@@ -617,7 +621,7 @@
 
     function saveGems() { localStorage.setItem('es_gems', myGems.toString()); document.getElementById('lobby-gem-text').innerText = `💎 보유 보석: ${myGems}`; window.saveProgress({ myGems, unlockedChars, selectedChar }); }
     function addGems(amount) { myGems += amount; saveGems(); }
-    function updateLobbyUI() {
+    window.updateLobbyUI = function() {
         saveGems(); const list = document.getElementById('char-list'); list.innerHTML = '';
         for(let key in CHARS) {
             let c = CHARS[key]; let isUnl = unlockedChars.includes(key);
@@ -1662,4 +1666,144 @@
         px(c, s*0.3, -s*0.3, u, u, eye); px(c, s*0.3, s*0.25, u, u, eye);
         c.restore();
         if(charName) { let a=CHARS[selectedChar].acc;
-            if(a==='halo'){ px(c, x-s*0.7, y-
+            if(a==='halo'){ px(c, x-s*0.7, y-s*1.25, s*1.4, u, '#fff58a'); }
+            if(a==='gold_helm'){ px(c, x-s*0.8, y-s*1.15, s*1.6, s*0.55, '#ffd93b'); px(c, x-s*0.8, y-s*0.95, s*1.6, u, '#b8860b'); }
+            if(a==='leaf_crown'){ px(c, x-s*0.8, y-s*0.95, s*1.6, u*1.5, '#2eb8b0'); }
+            if(a==='bandana'){ px(c, x-s*0.8, y-s*0.7, s*1.6, u*1.6, '#ff5470'); }
+            if(a==='hat'){ px(c, x-s*0.9, y-s*0.55, s*1.8, u, '#341f97'); px(c, x-s*0.4, y-s*1.6, s*0.8, s*1.1, '#7b5bff'); }
+            if(a==='glasses'){ c.save(); c.translate(x,y); c.rotate(angle); px(c, s*0.1, -s*0.5, s*0.9, u*1.3, '#101018'); c.restore(); }
+            if(a==='shield'){ px(c, x-s*1.15, y-s*0.3, u*1.6, s*0.9, '#8a84b4'); }
+        }
+        c.globalAlpha = 1.0; c.restore();
+    }
+
+    function drawShopAndRoulette(c) {
+        if (gameMode.startsWith('arena')) return;
+        const sx = shop.x, sy = shop.y, sw = shop.width, sh = shop.height; const cx = sx + sw/2, cy = sy + sh/2;
+        const isSafe = isSafeZoneActive();
+        c.save(); c.translate(cx, cy); c.rotate(gameFrame * 0.008);
+        c.fillStyle = isSafe ? 'rgba(91,217,122,0.12)' : 'rgba(255,84,112,0.12)'; c.beginPath(); c.arc(0,0,safeZoneRadius,0,Math.PI*2); c.fill();
+        c.strokeStyle = isSafe ? 'rgba(91,217,122,0.85)' : 'rgba(255,84,112,0.85)'; c.lineWidth = 6; c.setLineDash([18,16]); c.beginPath(); c.arc(0,0,safeZoneRadius,0,Math.PI*2); c.stroke(); c.setLineDash([]);
+        c.restore();
+        px(c, sx, sy, sw, sh, '#5b3a22'); px(c, sx, sy, sw, 8, '#3a2414');
+        for(let i=0;i<sw/26;i++){ c.fillStyle = i%2===0 ? '#c0392b' : '#ffd93b'; c.beginPath(); c.moveTo(sx+i*26, sy); c.lineTo(sx+i*26+13, sy-18); c.lineTo(sx+(i+1)*26+13, sy-18); c.lineTo(sx+(i+1)*26, sy); c.fill(); }
+        px(c, cx-48, sy+sh/2-18, 96, 36, '#7b5bff'); px(c, cx-48, sy+sh/2-18, 96, 4, '#a98bff');
+        c.fillStyle = '#fff'; c.font = '11px Galmuri, monospace'; c.textAlign = 'center'; c.fillText('만물상', cx, sy+sh/2+4);
+        const rx = rouletteObj.x, ry = rouletteObj.y, rr = rouletteObj.r;
+        c.save(); c.translate(rx, ry); c.rotate(gameFrame*0.05);
+        for(let i=0;i<8;i++){ c.fillStyle = i%2===0 ? '#ff9ff3' : '#f368e0'; c.beginPath(); c.moveTo(0,0); c.arc(0,0,rr,(Math.PI*2/8)*i,(Math.PI*2/8)*(i+1)); c.fill(); }
+        c.restore(); px(c, rx-2, ry-rr-6, 4, 10, '#fff');
+        c.fillStyle = '#fff'; c.font = '10px Galmuri, monospace'; c.fillText('룰렛', rx, ry+rr+16);
+    }
+
+    function drawProjectileArray(arr, camL, camR, camT, camB) {
+        for (let k = 0; k < arr.length; k++) {
+            const p = arr[k];
+            if (p.x < camL || p.x > camR || p.y < camT || p.y > camB) continue;
+            if (p.radius > 30) { ctx.globalAlpha = 0.5; px(ctx, p.x-p.radius, p.y-p.radius, p.radius*2, p.radius*2, p.color); ctx.globalAlpha = 1; }
+            else { let r = Math.round(p.radius); px(ctx, p.x-r, p.y-r, r*2, r*2, p.color); px(ctx, p.x-r*0.4, p.y-r*0.6, r*0.8, r*0.8, '#fff'); }
+        }
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.save(); ctx.translate(-Math.round(camera.x), -Math.round(camera.y));
+        let pad = 160; let camL = camera.x - pad, camR = camera.x + canvas.width + pad, camT = camera.y - pad, camB = camera.y + canvas.height + pad;
+        let cx = camera.x, cy = camera.y, cw = canvas.width, ch = canvas.height;
+        let sx = Math.max(0, cx), sy = Math.max(0, cy);
+        let sWidth = Math.min(bgCanvas.width - sx, cw), sHeight = Math.min(bgCanvas.height - sy, ch);
+        let ddx = sx - cx, ddy = sy - cy;
+        if (finalBossSpawned) { ctx.fillStyle = '#0a0612'; ctx.fillRect(cx, cy, cw, ch); }
+        else if (sWidth > 0 && sHeight > 0) { ctx.drawImage(bgCanvas, sx, sy, sWidth, sHeight, cx + ddx, cy + ddy, sWidth, sHeight); }
+
+        if (player.domainActive > 0) { let dr = 350; if (skills.r.level === 2) dr = 450; if (skills.r.level >= 3) dr = 600; const g = ctx.createRadialGradient(player.x, player.y, 0, player.x, player.y, dr); g.addColorStop(0, 'rgba(0,0,0,0.7)'); g.addColorStop(0.8, 'rgba(79,156,255,0.4)'); g.addColorStop(1, 'transparent'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(player.x, player.y, dr, 0, Math.PI*2); ctx.fill(); ctx.strokeStyle = EL[skills.r.element].color; ctx.lineWidth = 4; ctx.setLineDash([12,10]); ctx.beginPath(); ctx.arc(player.x, player.y, dr, 0, Math.PI*2); ctx.stroke(); ctx.setLineDash([]); }
+
+        visualEffects.forEach(v => { if (v.x < camL || v.x > camR || v.y < camT || v.y > camB) return; ctx.globalAlpha = v.life; if (v.type === 'shake') { px(ctx, v.x-60, v.y-60, 120, 120, 'rgba(139,90,40,0.4)'); } ctx.globalAlpha = 1.0; });
+        drawShopAndRoulette(ctx);
+        obstacles.forEach(o => { if(o.type === 'water') { if(o.x > camL && o.x < camR && o.y > camT && o.y < camB) drawWaterPuddle(ctx, o.x, o.y, o.size); } });
+
+        items.forEach(i => { if (i.x < camL || i.x > camR || i.y < camT || i.y > camB) return;
+            if (i.type === 'coin') { let bob = Math.sin(gameFrame*0.15 + i.x)*2; px(ctx, i.x-6, i.y-6+bob, 12, 12, '#ffd93b'); px(ctx, i.x-3, i.y-6+bob, 3, 12, '#fff58a'); px(ctx, i.x-6, i.y+2+bob, 12, 4, '#b8860b'); }
+            else if (i.type === 'chest') { let col = EL[i.equip.element].color; px(ctx, i.x-i.size, i.y-i.size*0.6, i.size*2, i.size*1.3, '#8a5a2b'); px(ctx, i.x-i.size, i.y-i.size, i.size*2, i.size*0.5, col); px(ctx, i.x-3, i.y-i.size*0.5, 6, 6, '#ffd93b'); }
+            else if (i.type === 'heart') { ctx.font = '24px Arial'; ctx.fillText('❤️', i.x-12, i.y+8); }
+            else if (i.type === 'loot_box') { ctx.font = '24px Arial'; ctx.fillText('🎁', i.x-12, i.y+8); }
+        });
+
+        enemies.forEach(e => {
+            if (e.x < camL || e.x > camR || e.y < camT || e.y > camB) return; let isStealth = e.aiType === 'hc_assassin' && e.state === 'stealth';
+            drawEntity(ctx, e.x, e.y, e.size, e.color1, e.color2, e.damageCooldown > 0, e.angle, e.weapon, e.isAttacking || e.attackCooldown > e.attackCdLimit - 10, e.element, isStealth, null);
+            if (e.invincible > 0) { ctx.strokeStyle='#ff9a3b'; ctx.lineWidth=3; ctx.strokeRect(e.x-e.size-6, e.y-e.size-6, (e.size+6)*2, (e.size+6)*2); }
+            if(!isStealth) { let big = (e.aiType.includes('boss') || e.aiType.includes('hc_') || e.aiType.includes('final_') || e.aiType === 'arena_ai'); let hpW = big ? 180 : 46; let hpOff = big ? 90 : 23;
+                px(ctx, e.x-hpOff-1, e.y-e.size-21, hpW+2, 8, '#000');
+                ctx.fillStyle = e.aiType.includes('final_') ? '#ffd93b' : (e.aiType.includes('hc_') || e.aiType === 'arena_ai' ? '#b06bff' : '#ff5470'); ctx.fillRect(e.x-hpOff, e.y-e.size-20, Math.max(0,hpW * (e.hp / e.maxHp)), 6);
+                if (big) { ctx.fillStyle = '#fff'; ctx.font = '11px Galmuri, monospace'; ctx.textAlign = 'center'; let t = `[${EL[e.element].name}] ` + (e.aiType === 'arena_ai' ? '투기장 AI' : (e.aiType.includes('final_')?'최종 ':e.aiType.includes('hc_')?'하드코어 ':'') + '보스'); ctx.fillText(t, e.x, e.y - e.size - 28); }
+            }
+        });
+
+        if (isPvp && pvpOpponent && !pvpFinished) {
+            const o = pvpOpponent;
+            const oc = CHARS[o.char] || CHARS['c_base'];
+            const oClr = oc.color === 'rainbow' ? `hsl(${gameFrame%360},80%,60%)` : oc.color;
+            drawEntity(ctx, o.x, o.y, o.size, oClr, '#7a1028', o.damageCooldown > 0, o.angle, o.weapon || 'sword', o.attacking, 'fire', false, oc.name);
+            px(ctx, o.x-91, o.y-o.size-21, 182, 8, '#000');
+            ctx.fillStyle = '#ff5470'; ctx.fillRect(o.x-90, o.y-o.size-20, Math.max(0, 180*(o.hp/o.maxHp)), 6);
+            ctx.fillStyle = '#fff'; ctx.font = '11px Galmuri, monospace'; ctx.textAlign = 'center';
+            ctx.fillText(`🆚 ${o.nick} (${oc.name})`, o.x, o.y - o.size - 28);
+        }
+
+        friendlyBots.forEach(b => { if (b.x < camL || b.x > camR || b.y < camT || b.y > camB) return;
+            drawEntity(ctx, b.x, b.y, b.size, '#b06bff', '#5a2e8a', false, b.angle, b.weapon, b.isAttacking, 'dark', false, null);
+            px(ctx, b.x-23, b.y-b.size-21, 46, 8, '#000'); ctx.fillStyle = '#5bd97a'; ctx.fillRect(b.x-22, b.y-b.size-20, Math.max(0,45*(b.hp/b.maxHp)), 6);
+            ctx.fillStyle = '#fff'; ctx.font = '10px Galmuri, monospace'; ctx.textAlign = 'center'; ctx.fillText('아군 봇', b.x, b.y - b.size - 26);
+        });
+
+        drawProjectileArray(projectiles, camL, camR, camT, camB);
+        drawProjectileArray(enemyProjectiles, camL, camR, camT, camB);
+        visualEffects.forEach(v => { if (v.x < camL || v.x > camR || v.y < camT || v.y > camB) return; ctx.globalAlpha = v.life;
+            if (v.type === 'sword_slash') { ctx.save(); ctx.translate(v.x, v.y); ctx.rotate(v.angle); ctx.fillStyle = equipped.melee ? EL[equipped.melee.element].color : 'rgba(255,84,112,0.85)'; ctx.beginPath(); ctx.arc(0,0,player.attackRadius,-Math.PI/2.5,Math.PI/2.5); ctx.lineTo(0,0); ctx.fill(); ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.beginPath(); ctx.arc(0,0,player.attackRadius*0.9,-Math.PI/2.8,Math.PI/2.8); ctx.lineTo(0,0); ctx.fill(); ctx.restore(); }
+            else if (v.type === 'magic_circle') { ctx.save(); ctx.translate(v.x, v.y); ctx.rotate(gameFrame*0.2); ctx.strokeStyle = '#b06bff'; ctx.lineWidth = 4; ctx.setLineDash([8,6]); ctx.beginPath(); ctx.arc(0,0,50,0,Math.PI*2); ctx.stroke(); ctx.setLineDash([]); ctx.beginPath(); ctx.moveTo(-40,-25); ctx.lineTo(40,-25); ctx.lineTo(0,45); ctx.closePath(); ctx.stroke(); ctx.restore(); }
+            else if (v.type === 'muzzle_flash') { ctx.save(); ctx.translate(v.x, v.y); ctx.rotate(v.angle); px(ctx,0,-6,40,12,'rgba(255,217,59,0.9)'); px(ctx,10,-3,26,6,'#fff'); ctx.restore(); }
+            ctx.globalAlpha = 1.0; });
+
+        if (player.invincible > 0) { ctx.strokeStyle='#ff9a3b'; ctx.lineWidth=3; ctx.strokeRect(player.x-player.size-6, player.y-player.size-6, (player.size+6)*2, (player.size+6)*2); }
+        if (player.healBuff > 0) { ctx.globalAlpha = 0.25; px(ctx, player.x-player.size-4, player.y-player.size-4, (player.size+4)*2, (player.size+4)*2, '#5bd97a'); ctx.globalAlpha = 1; }
+
+        let pWeapon = equipped.melee ? equipped.melee.weaponType : 'sword'; let pElem = equipped.melee ? equipped.melee.element : 'neutral'; let charClr = CHARS[selectedChar].color === 'rainbow' ? `hsl(${gameFrame%360},80%,60%)` : CHARS[selectedChar].color;
+        drawEntity(ctx, player.x, player.y, player.size, player.invincible > 0 ? EL['earth'].color : charClr, player.invincible > 0 ? '#b8860b' : '#7a3fa0', false, player.angle, pWeapon, player.isAttacking, pElem, false, CHARS[selectedChar].name);
+
+        pets.forEach(pet => { let ps = 8 + pet.level*2; px(ctx, pet.x-ps, pet.y-ps, ps*2, ps*2, pet.color); px(ctx, pet.x-ps*0.5, pet.y-ps*0.5, ps*0.6, ps*0.6, '#fff'); px(ctx, pet.x+ps*0.1, pet.y-ps*0.5, ps*0.6, ps*0.6, '#fff'); px(ctx, pet.x-ps*0.35, pet.y-ps*0.35, ps*0.3, ps*0.3, '#000'); px(ctx, pet.x+ps*0.25, pet.y-ps*0.35, ps*0.3, ps*0.3, '#000'); });
+        particles.forEach(p => { if (p.x < camL || p.x > camR || p.y < camT || p.y > camB) return; ctx.globalAlpha = Math.max(0,p.life); let s=p.size||4; px(ctx, p.x-s/2, p.y-s/2, s, s, p.color); ctx.globalAlpha = 1.0; });
+        floatingTexts.forEach(f => { if (f.x < camL || f.x > camR || f.y < camT || f.y > camB) return; ctx.globalAlpha = Math.max(0,f.life); ctx.font = "12px Galmuri, monospace"; ctx.textAlign = "center"; ctx.fillStyle = '#000'; ctx.fillText(f.text, f.x+2, f.y+2); ctx.fillStyle = f.color; ctx.fillText(f.text, f.x, f.y); ctx.globalAlpha = 1.0; });
+
+        enemies.forEach(e => { if (e.aiType.includes('boss') || e.aiType.includes('hc_') || e.aiType.includes('final_') || e.aiType === 'arena_ai') { let sX = e.x - camera.x, sY = e.y - camera.y; if (sX < 0 || sX > canvas.width || sY < 0 || sY > canvas.height) { let a = Math.atan2(e.y - player.y, e.x - player.x); let ax = (canvas.width/2) + Math.cos(a) * (canvas.width/2 - 60); let ay = (canvas.height/2) + Math.sin(a) * (canvas.height/2 - 60); ax = Math.max(40, Math.min(canvas.width - 40, ax)); ay = Math.max(40, Math.min(canvas.height - 40, ay)); ctx.save(); ctx.translate(ax + camera.x, ay + camera.y); ctx.rotate(a); ctx.fillStyle = '#ff2e63'; ctx.beginPath(); ctx.moveTo(28,0); ctx.lineTo(-14,18); ctx.lineTo(-14,-18); ctx.fill(); ctx.rotate(-a); ctx.fillStyle = '#fff'; ctx.font = '11px Galmuri, monospace'; ctx.textAlign = 'center'; ctx.fillText('BOSS', 0, 34); ctx.restore(); } } });
+
+        if (isPvp && pvpOpponent && !pvpFinished) { let sX = pvpOpponent.x - camera.x, sY = pvpOpponent.y - camera.y; if (sX < 0 || sX > canvas.width || sY < 0 || sY > canvas.height) { let a = Math.atan2(pvpOpponent.y - player.y, pvpOpponent.x - player.x); let ax = (canvas.width/2) + Math.cos(a) * (canvas.width/2 - 60); let ay = (canvas.height/2) + Math.sin(a) * (canvas.height/2 - 60); ax = Math.max(40, Math.min(canvas.width - 40, ax)); ay = Math.max(40, Math.min(canvas.height - 40, ay)); ctx.save(); ctx.translate(ax + camera.x, ay + camera.y); ctx.rotate(a); ctx.fillStyle = '#ff2e63'; ctx.beginPath(); ctx.moveTo(28,0); ctx.lineTo(-14,18); ctx.lineTo(-14,-18); ctx.fill(); ctx.rotate(-a); ctx.fillStyle = '#fff'; ctx.font = '11px Galmuri, monospace'; ctx.textAlign = 'center'; ctx.fillText('🆚', 0, 34); ctx.restore(); } }
+        ctx.restore();
+
+        if (!gameMode.startsWith('arena')) {
+            const shopCenterX = shop.x + shop.width/2, shopCenterY = shop.y + shop.height/2; let screenShopX = shopCenterX - camera.x, screenShopY = shopCenterY - camera.y;
+            if (screenShopX < 0 || screenShopX > canvas.width || screenShopY < 0 || screenShopY > canvas.height) { let a = Math.atan2(shopCenterY - player.y, shopCenterX - player.x); let ax = (canvas.width/2) + Math.cos(a) * (canvas.width/2 - 50); let ay = (canvas.height/2) + Math.sin(a) * (canvas.height/2 - 50); ax = Math.max(50, Math.min(canvas.width - 50, ax)); ay = Math.max(50, Math.min(canvas.height - 50, ay)); ctx.save(); ctx.translate(ax, ay); ctx.rotate(a); ctx.fillStyle = isSafeZoneActive() ? '#5bd97a' : '#ff5470'; ctx.beginPath(); ctx.moveTo(25,0); ctx.lineTo(-15,18); ctx.lineTo(-15,-18); ctx.fill(); ctx.rotate(-a); ctx.fillStyle = '#fff'; ctx.font = '10px Galmuri, monospace'; ctx.textAlign = 'center'; ctx.fillText(isSafeZoneActive() ? '안전/상점' : '상점(위험)', 0, 33); ctx.restore(); }
+        }
+    }
+
+    let lastTime = 0; const frameDelay = 1000 / targetFPS; let accumulator = 0;
+    function gameLoop(timestamp) {
+        requestAnimationFrame(gameLoop);
+        if (!timestamp) timestamp = performance.now();
+        if (!lastTime) lastTime = timestamp;
+        let delta = timestamp - lastTime; lastTime = timestamp;
+        if (delta > 250) delta = 250;
+        accumulator += delta;
+        let steps = 0;
+        while (accumulator >= frameDelay && steps < 5) {
+            if (isGameStarted && !isPaused && !isDead) update();
+            accumulator -= frameDelay; steps++;
+        }
+        if (accumulator > frameDelay * 5) accumulator = 0;
+        if (isGameStarted) draw();
+    }
+
+    initSettings(); requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
